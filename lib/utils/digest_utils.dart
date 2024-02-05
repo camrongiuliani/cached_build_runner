@@ -1,10 +1,9 @@
-// ignore_for_file: avoid-weak-cryptographic-algorithms
-
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cached_build_runner/core/dependency_visitor.dart';
 import 'package:crypto/crypto.dart';
+
+import '../core/dependency_visitor.dart';
 
 abstract class DigestUtils {
   /// Calculates the MD5 digest of a given string [string].
@@ -28,21 +27,19 @@ abstract class DigestUtils {
     final sb = StringBuffer();
 
     for (final file in filePaths) {
-      sb
-        ..write(generateDigestForSingleFile(file))
-        ..write('-');
+      sb.write(generateDigestForSingleFile(file));
+      sb.write('-');
     }
 
     return generateDigestForRawString(sb.toString());
   }
 
-  /// Calculates a MD5 digest of a given class file, considering it's dependencies as well.
+  /// Calculates a MD5 digest of a given class file, considering it's dependencies as well
   static String generateDigestForClassFile(
     DependencyVisitor visitor,
     String filePath,
   ) {
     final dependencies = visitor.getDependenciesPath(filePath);
-
     return generateDigestForMultipleFile([filePath, ...dependencies]);
   }
 
@@ -60,9 +57,8 @@ abstract class DigestUtils {
     final sb = StringBuffer();
 
     for (final file in filePaths) {
-      sb
-        ..write(generateDigestForClassFile(visitor, file))
-        ..write('-');
+      sb.write(generateDigestForClassFile(visitor, file));
+      sb.write('-');
     }
 
     return generateDigestForRawString(sb.toString());

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:cached_build_runner/model/code_file.dart';
+
 typedef Transaction<T> = Future<T> Function(DatabaseService db);
 
 /// An interface for a database service used to cache generated code.
@@ -7,12 +9,11 @@ abstract class DatabaseService {
   /// Initializes the database service.
   Future<void> init();
 
-  /// Returns all stored keys and their associated value.
   Future<Map<String, String>> getAllData();
 
   /// Checks if the mapping is available for the given digests in bulk.
   FutureOr<Map<String, bool>> isMappingAvailableForBulk(
-    Iterable<String> digests,
+    Iterable<CodeFile> files,
   );
 
   /// Checks if the mapping is available for the given digest.

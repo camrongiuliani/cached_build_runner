@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:cached_build_runner/core/dependency_visitor.dart';
 import 'package:cached_build_runner/model/code_file.dart';
-import 'package:cached_build_runner/model/code_file_generated_type.dart';
 import 'package:cached_build_runner/utils/constants.dart';
 import 'package:cached_build_runner/utils/digest_utils.dart';
 import 'package:cached_build_runner/utils/extension.dart';
@@ -10,8 +9,6 @@ import 'package:cached_build_runner/utils/logger.dart';
 import 'package:cached_build_runner/utils/utils.dart';
 import 'package:get_it/get_it.dart';
 import 'package:path/path.dart' as path;
-
-typedef CodeFileBuild = ({String path, String? suffix, CodeFileGeneratedType type});
 
 class FileParser {
   final DependencyVisitor _dependencyVisitor;
@@ -21,59 +18,93 @@ class FileParser {
 
   /// Returns a list of [CodeFile] instances that represent the files that need code generation.
   List<CodeFile> getFilesNeedingGeneration() {
-    // Files in "lib/" that needs code generation
+    /// Files in "lib/" that needs code generation
     final libDirectory = Directory(path.join(Utils.projectDirectory, 'lib'));
 
-    final libPathList = <CodeFileBuild>[];
+    final libFiles = libDirectory
+        .listSync(
+          recursive: true,
+          followLinks: false,
+        )
+        .where((f) => !f.path.contains('.build_cache'));
 
-    final libFiles = libDirectory.listSync(
-      recursive: true,
-      followLinks: false,
-    );
+    final codeFiles = <CodeFile>[];
 
     for (final entity in libFiles) {
       if (entity is! File || !entity.isDartSourceCodeFile()) continue;
 
-      final result = _parseFile(entity);
+      final outputs = _parseFile(entity);
 
-      if (result != null) libPathList.add(result);
+      if (outputs.isNotEmpty) {
+        codeFiles.add(
+          CodeFile(
+            path: entity.path,
+            digest: DigestUtils.generateDigestForClassFile(
+              _dependencyVisitor,
+              entity.path,
+            ),
+            generatedOutput: outputs.map((e) {
+              return GeneratedFile(
+                sourcePath: entity.path,
+                path: entity.path.replaceAll('.dart', '.${e.suffix ?? 'g'}.dart'),
+                suffix: e.suffix,
+                sourceDigest: DigestUtils.generateDigestForClassFile(
+                  _dependencyVisitor,
+                  entity.path,
+                ),
+                generatedType: e.type,
+              );
+            }).toList(),
+          ),
+        );
+      }
     }
 
     Logger.i(
-      'Found ${libPathList.length} files in "lib/" that supports code generation',
+      'Found ${codeFiles.length} files in "lib/" that supports code generation',
     );
 
-    return libPathList
-        .map<CodeFile>(
-          (f) => CodeFile(
-            path: f.path,
-            digest: DigestUtils.generateDigestForClassFile(
-              _dependencyVisitor,
-              f.path,
-            ),
-            suffix: f.suffix,
-            generatedType: f.type,
-          ),
-        )
-        .toList();
+    return codeFiles;
   }
 
-  CodeFileBuild? _parseFile(File entity) {
+  List<GenFileDefinition> _parseFile(File entity) {
+    final outputs = <GenFileDefinition>[];
+
     final filePath = entity.path.trim();
     final fileContent = entity.readAsStringSync();
 
-    final partMatch = Constants.partGeneratedFileRegex.firstMatch(fileContent);
+    final partMatches =
+        Constants.partGeneratedFileRegex.allMatches(fileContent);
 
-    if (partMatch != null) {
-      return (path: filePath, suffix: partMatch.group(1), type: CodeFileGeneratedType.partFile);
+    if (partMatches.isNotEmpty) {
+      for (final match in partMatches) {
+        outputs.add(
+          (
+            sourcePath: filePath,
+            suffix: match.group(1),
+            type: CodeFileGeneratedType.partFile
+          ),
+        );
+      }
+      return outputs;
     }
 
-    final importMatch = Constants.generatedFileImportRegExp.firstMatch(fileContent);
+    final importMatches =
+        Constants.partGeneratedFileRegex.allMatches(fileContent);
 
-    if (importMatch != null) {
-      return (path: filePath, suffix: importMatch.group(1), type: CodeFileGeneratedType.import);
+    if (importMatches.isNotEmpty) {
+      for (final match in importMatches) {
+        outputs.add(
+          (
+            sourcePath: filePath,
+            suffix: match.group(1),
+            type: CodeFileGeneratedType.import,
+          ),
+        );
+      }
+      return outputs;
     }
 
-    return null;
+    return outputs;
   }
 }

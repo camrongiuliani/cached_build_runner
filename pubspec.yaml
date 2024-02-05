@@ -15,10 +15,11 @@ dependencies:
   get_it: ^7.6.7
   hive: ^2.2.3
   logger: ^1.1.0
-  meta: ^1.11.0
   path: ^1.8.2
   synchronized: ^3.0.1
   text_table: ^4.0.3
+  pool: ^1.5.1
+  collection: 1.18.0
 
 dev_dependencies:
   netglade_analysis: ^7.0.0

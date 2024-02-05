@@ -34,7 +34,7 @@ class DependencyVisitor {
   List<String> _convertImportStatementsToAbsolutePaths(
     String filePath,
     String contents, {
-    String directory = 'lib',
+    String directory = '',
   }) {
     Logger.d('File: $filePath');
 
@@ -47,12 +47,20 @@ class DependencyVisitor {
 
     final paths = <String>[];
 
-    // absolute import lines
-    for (final import in absoluteImportLines) {
-      paths.add(path.join(Utils.projectDirectory, directory, import));
+    var parts = filePath.split(Platform.pathSeparator);
+    var baseRoot = parts.sublist(0, parts.length - 1).join(Platform.pathSeparator);
+
+    if (baseRoot.endsWith('lib/src/model')) {
+      baseRoot = baseRoot.replaceAll('src/model', '');
     }
 
-    // relative import lines
+    /// absolute import lines
+    for (final import in absoluteImportLines) {
+      // paths.add(path.join(Utils.projectDirectory, directory, import));
+      paths.add(path.join(baseRoot, directory, import));
+    }
+
+    /// relative import lines
     for (final import in relativeImportLines) {
       paths.add(path.normalize(path.join(_dirName, import)));
     }
@@ -76,9 +84,9 @@ class DependencyVisitor {
 
     final _ = dependencies.add(filePath);
 
-    // Find out transitive dependencies
+    /// Find out transitive dependencies
     for (final import in imports) {
-      // There can be a cyclic dependency, so to make sure we are not visiting the same node multiple times
+      /// There can be a cyclic dependency, so to make sure we are not visiting the same node multiple times
       if (_hasNotVisited(import)) {
         _markVisited(import);
         // ignore: avoid-recursive-calls, recursive call is ok.
@@ -113,6 +121,27 @@ class DependencyVisitor {
         absoluteImports.add(importedPath);
       }
     }
+
+    // for (final line in dartSource.split('\n')) {
+    //   final relativeMatch = Constants.relativeOrPartFileImportRegex.firstMatch(line);
+    //   final packageMatch = Constants.appPackageImportRegex.firstMatch(line);
+
+    //   if (relativeMatch != null) {
+    //     final importedPath = relativeMatch.group(1);
+    //     if (importedPath != null) {
+    //       Logger.d('Rel. import -> $importedPath');
+    //       relativeImports.add(importedPath);
+    //     }
+    //   }
+
+    //   if (packageMatch != null) {
+    //     final importedPath = packageMatch.group(1);
+    //     if (importedPath != null) {
+    //       Logger.d('Package import: ${packageMatch.groups([0, 1]).map((e) => e.toString())}');
+    //       absoluteImports.add(importedPath);
+    //     }
+    //   }
+    // }
 
     return {
       _absoluteImportsConst: absoluteImports,

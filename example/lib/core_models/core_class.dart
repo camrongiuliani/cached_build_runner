@@ -1,3 +1,0 @@
-class CoreClass {
-  String? core;
-}

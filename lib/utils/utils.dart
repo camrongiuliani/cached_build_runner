@@ -32,14 +32,18 @@ abstract class Utils {
 
     for (final line in pubspecFile.readAsLinesSync()) {
       if (line.contains(searchString)) {
-        appPackageName = line.split(searchString).lastOrNull?.trim() ?? '';
+        appPackageName = line.split(searchString).last.trim();
       }
     }
   }
 
+  /// Logs a header [title] to the console.
+  // static void logHeader(String title) {
+  //   Logger.i(title);
+  // }
+
   /// Retrieves the file name from the given [path].
   static String getFileName(String path) {
-    // ignore: avoid-unsafe-collection-methods, its safe.
     return path.split('/').last;
   }
 

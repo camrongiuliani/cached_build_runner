@@ -1,3 +1,0 @@
-mixin CoreMixin {
-  String? mixinvalue;
-}

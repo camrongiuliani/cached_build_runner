@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cached_build_runner/database/database_service.dart';
+import 'package:cached_build_runner/model/code_file.dart';
 import 'package:hive/hive.dart';
 
 /// An implementation of [DatabaseService] using Hive.
@@ -49,6 +50,9 @@ class HiveDatabaseService implements DatabaseService {
 
   @override
   Future<void> createEntryForBulk(Map<String, String> cachedFilePaths) {
+    cachedFilePaths.removeWhere((key, value) {
+      return key.length > 253;
+    });
     return _box.putAll(cachedFilePaths);
   }
 
@@ -67,12 +71,14 @@ class HiveDatabaseService implements DatabaseService {
 
   @override
   FutureOr<Map<String, bool>> isMappingAvailableForBulk(
-    Iterable<String> digests,
+    Iterable<CodeFile> files,
   ) {
     final data = <String, bool>{};
 
-    for (final digest in digests) {
-      data[digest] = isMappingAvailable(digest) as bool;
+    for (final file in files) {
+      for (final output in file.generatedOutput) {
+        data[output.path] = isMappingAvailable(output.path) as bool;
+      }
     }
 
     return data;
@@ -121,7 +127,7 @@ class HiveDatabaseService implements DatabaseService {
     for (final key in _box.keys) {
       final value = _box.get(key);
 
-      result[key as String] = value ?? '';
+      result[key as String] = value!;
     }
 
     return Future.value(result);

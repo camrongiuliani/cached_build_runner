@@ -27,6 +27,7 @@ import 'package:cached_build_runner/utils/digest_utils.dart';
 import 'package:cached_build_runner/utils/extension.dart';
 import 'package:cached_build_runner/utils/logger.dart';
 import 'package:cached_build_runner/utils/utils.dart';
+import 'package:collection/collection.dart';
 import 'package:get_it/get_it.dart';
 import 'package:path/path.dart' as path;
 import 'package:synchronized/synchronized.dart' as sync;
@@ -50,7 +51,8 @@ class CachedBuildRunner implements Disposable {
     BuildRunnerWrapper? buildRunnerWrapper,
   })  : _fileParser = fileParser ?? GetIt.I<FileParser>(),
         _cacheProvider = cacheProvider ?? GetIt.I<CacheProvider>(),
-        _buildRunnerWrapper = buildRunnerWrapper ?? GetIt.I<BuildRunnerWrapper>();
+        _buildRunnerWrapper =
+            buildRunnerWrapper ?? GetIt.I<BuildRunnerWrapper>();
 
   Future<void> watch() async {
     _watchForDependencyChanges();
@@ -70,7 +72,8 @@ class CachedBuildRunner implements Disposable {
 
     // let's listen for file changes in the project directory
     // specifically in "lib" irectory
-    _libWatch = libDirectory.watchDartSourceCodeFiles().listen(_onFileSystemEvent);
+    _libWatch =
+        libDirectory.watchDartSourceCodeFiles().listen(_onFileSystemEvent);
   }
 
   /// Runs an efficient version of `build_runner build` by determining which
@@ -106,21 +109,49 @@ class CachedBuildRunner implements Disposable {
     final goodFiles = mappedResult.good;
     final badFiles = mappedResult.bad;
 
-    Logger.i('No. of cached files: ${goodFiles.length}');
-    Logger.i('No. of non-cached files: ${badFiles.length}');
+    Logger.i('No. of cached files: ${goodFiles.map((e) => e.generatedOutput).flattened.length}');
+    Logger.i('No. of non-cached files: ${badFiles.map((e) => e.generatedOutput).flattened.length}');
 
     Logger.v(badFiles.map((e) => e.path).join('\n'));
 
-    /// let's handle bad files - by generating the .g.dart / .mocks.dart files for them
-    final success = _buildRunnerWrapper.runBuild(badFiles);
+    List<CodeFile> errorFiles = [];
 
-    if (!success) return;
+    /// let's handle bad files - by generating the .g.dart / .mocks.dart files for them
+    final success = await _buildRunnerWrapper.runBuild(
+      badFiles,
+      (files) async {
+        /// at last, let's cache the bad files - they may be required next time
+        await _cacheProvider.cacheFiles(
+          files,
+          (errFile) {
+            errorFiles.add(errFile);
+          },
+        );
+      },
+    );
+    // await listAllCachedFiles();
+
+    if (errorFiles.isNotEmpty) {
+      final success = await _buildRunnerWrapper.runBuild(
+        errorFiles.reversed.toList(),
+            (files) async {
+          /// at last, let's cache the bad files - they may be required next time
+          await _cacheProvider.cacheFiles(
+            files,
+                (errFile) {
+              // errorFiles.add(errFile);
+              //     throw Exception('Error on second try of file: ${errFile.path}');
+                  Logger.e('Error on second try of file: ${errFile.path}');
+            },
+          );
+        },
+      );
+    }
+
+    // if (!success) return;
 
     /// let's handle the good files - by copying the cached generated files to appropriate path
-    await _cacheProvider.copyGeneratedCodesFor(goodFiles);
-
-    /// at last, let's cache the bad files - they may be required next time
-    await _cacheProvider.cacheFiles(badFiles);
+    // await _cacheProvider.copyGeneratedCodesFor(goodFiles);
 
     /// We are done, probably?
   }
@@ -131,10 +162,20 @@ class CachedBuildRunner implements Disposable {
 
     final mappedResult = await _cacheProvider.mapFilesToCache(files);
 
-    final goodFiles = mappedResult.good.map<_CachedFileInfo>((e) => (path: e.path, digest: e.digest, dirty: false));
-    final badFiles = mappedResult.bad.map((e) => (path: e.path, digest: e.digest, dirty: true));
+    final goodFiles = mappedResult.good.map<_CachedFileInfo>(
+        (e) => (path: e.path, digest: e.digest, dirty: false));
+    final badFiles = mappedResult.bad
+        .map((e) => (path: e.path, digest: e.digest, dirty: true));
 
-    final mappedFiles = [...goodFiles, ...badFiles]..sort((a, b) => a.path.compareTo(b.path));
+    final mappedFiles = [...goodFiles, ...badFiles]
+        .where((e) {
+          return e.dirty;
+        })
+        .toList()
+        .sublist(0, 50)
+      ..sort((a, b) {
+        return a.path.compareTo(b.path);
+      });
 
     // final table = const TableRenderer(border: Border.simple).render(
     //   mappedFiles.map((e) => [e.path, e.digest, e.dirty].toList()),
@@ -163,10 +204,18 @@ class CachedBuildRunner implements Disposable {
             .map<Row>(
               (e) => e.dirty
                   ? Row(
-                      cells: [Cell(redPen(e.path)), Cell(redPen(e.digest)), Cell(redPen(e.dirty.toString()))],
+                      cells: [
+                        Cell(redPen(e.path)),
+                        Cell(redPen(e.digest)),
+                        Cell(redPen(e.dirty.toString()))
+                      ],
                     )
                   : Row(
-                      cells: [Cell(e.path), Cell(e.digest), Cell(e.dirty.toString())],
+                      cells: [
+                        Cell(e.path),
+                        Cell(e.digest),
+                        Cell(e.dirty.toString())
+                      ],
                     ),
             )
             .toList(),
@@ -238,7 +287,8 @@ class CachedBuildRunner implements Disposable {
       followLinks: false,
     )) {
       if (entity is File && entity.isDartSourceCodeFile()) {
-        _contentDigestMap[entity.path] = DigestUtils.generateDigestForSingleFile(
+        _contentDigestMap[entity.path] =
+            DigestUtils.generateDigestForSingleFile(
           entity.path,
         );
       }

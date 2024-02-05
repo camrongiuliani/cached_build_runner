@@ -1,34 +1,51 @@
-import 'package:cached_build_runner/model/code_file_generated_type.dart';
 import 'package:cached_build_runner/utils/utils.dart';
-import 'package:path/path.dart' as path_utils;
+import 'package:collection/collection.dart';
+import 'package:path/path.dart' as pathUtils;
+
+typedef GenFileDefinition = ({String sourcePath, String? suffix, CodeFileGeneratedType type});
+
+enum CodeFileGeneratedType {
+  import,
+  partFile,
+}
 
 class CodeFile {
   final String path;
   final String digest;
   final bool isTestFile;
-  final String? suffix;
-  final CodeFileGeneratedType generatedType;
+  final List<GeneratedFile> generatedOutput;
 
   const CodeFile({
     required this.path,
     required this.digest,
-    required this.suffix,
-    required this.generatedType,
+    required this.generatedOutput,
     this.isTestFile = false,
   });
 
-  String getGeneratedFilePath() {
-    final lastDotDart = path.lastIndexOf('.dart');
-
-    final fileExtension = '.${suffix ?? 'g'}.dart';
-    // ignore: avoid-substring, should be ok.
-    final subPath = '${path.substring(0, lastDotDart)}$fileExtension';
-
-    return path_utils.relative(subPath, from: Utils.projectDirectory);
+  String get preferredGenFilter {
+    return generatedOutput.firstWhereOrNull((o) {
+      return o.suffix == 'g';
+    })?.path ?? '';
   }
 
   @override
   String toString() {
-    return '($path, $digest, $isTestFile, Suffix: ${suffix ?? 'null'})';
+    return '($path, $digest, $isTestFile, Outputs: ${generatedOutput.length})';
   }
+}
+
+class GeneratedFile {
+  final String path;
+  final String sourceDigest;
+  final String sourcePath;
+  final String? suffix;
+  final CodeFileGeneratedType generatedType;
+
+  const GeneratedFile({
+    required this.path,
+    required this.sourceDigest,
+    required this.sourcePath,
+    required this.suffix,
+    required this.generatedType,
+  });
 }
