@@ -7,11 +7,10 @@ import 'package:cached_build_runner/utils/constants.dart';
 import 'package:cached_build_runner/utils/digest_utils.dart';
 import 'package:cached_build_runner/utils/logger.dart';
 import 'package:cached_build_runner/utils/utils.dart';
-import 'package:collection/collection.dart';
 import 'package:get_it/get_it.dart';
 import 'package:path/path.dart' as path;
 
-typedef CachedFilesResult = ({List<CodeFile> good, List<CodeFile> bad});
+typedef CachedFilesResult = ({List<CodeFile> cached, List<CodeFile> notCached});
 
 class CacheProvider {
   final DatabaseFactory _databaseFactory;
@@ -38,7 +37,7 @@ class CacheProvider {
 
     final database = await _database;
 
-    Logger.i('Prunning is enabled - checking pubpsec.lock');
+    Logger.i('Pruning is enabled - checking pubpsec.lock');
 
     final pubspecLockPath =
         path.join(Utils.projectDirectory, Constants.pubpsecLockFileName);
@@ -59,103 +58,105 @@ class CacheProvider {
 
     Logger.v('Pubspec.lock digest: $digest');
     Logger.v('Existing Pubspec.lock digest: $digest');
-    Logger.v('Will prune? ${digest != existingDigest ? 'YES' : 'NO'}');
+    Logger.i('Needs prune: ${digest != existingDigest ? 'YES' : 'NO'}');
 
     if (existingDigest != null && digest != existingDigest) {
-      Logger.i(
-          '!!! Pruning cache as pubspec.lock was changed from last time !!!');
+      Logger.i('Pruning cache as pubspec.lock has changed');
       await database.prune(keysToKeep: [Constants.pubpsecLockFileName]);
     }
 
-    await _dbOperation(
-        (db) => db.createCustomEntry(Constants.pubpsecLockFileName, digest));
+    await _dbOperation((db) {
+      return db.createCustomEntry(Constants.pubpsecLockFileName, digest);
+    });
   }
 
-  Future<CachedFilesResult> mapFilesToCache(List<CodeFile> files) async {
-    final goodFiles = <CodeFile>[];
-    final badFiles = <CodeFile>[];
+  Future<CachedFilesResult> determineCache(List<CodeFile> files) async {
+    final cached = <CodeFile>[];
+    final notCached = <CodeFile>[];
 
-    final bulkMapping = await _dbOperation(
-      (db) async => await db.isMappingAvailableForBulk(files),
+    await _dbOperation(
+      (db) async {
+        for (final file in files) {
+          var valid = true;
+
+          for (final output in file.generatedOutput) {
+            final cached = await db.getCachedFile(output.key);
+
+            if (cached == null || cached.ownerDigest != file.digest) {
+              notCached.add(file);
+              valid = false;
+              break;
+            }
+          }
+
+          if (valid) {
+            cached.add(file);
+          }
+        }
+      },
     );
 
-    /// segregate good and bad files
-    /// good files -> files for whom the generated codes are available
-    /// bad files -> files for whom no generated codes are available in the cache
-    for (final file in files) {
-      final outputs = file.generatedOutput;
-
-      bool hasCachedForAllOutputs = false;
-
-      for (final output in outputs) {
-        final isFileAvail = bulkMapping['${output.path}'] ?? false;
-
-        if (!isFileAvail) {
-          hasCachedForAllOutputs = false;
-          break;
-        }
-
-        hasCachedForAllOutputs = true;
-      }
-
-      /// mock generated files are always considered badFiles,
-      /// as they depends on various services, and to keep track of changes can become complicated
-      if (hasCachedForAllOutputs) {
-        goodFiles.add(file);
-      } else {
-        badFiles.add(file);
-      }
-    }
-
-    return (good: goodFiles, bad: badFiles);
+    return (cached: cached, notCached: notCached);
   }
 
-  Future<void> cacheFiles(List<CodeFile> files, void Function(CodeFile) onError) async {
-    var outputs = files.map((e) => e.generatedOutput).flattened;
+  Future<void> cacheOutput(
+    Iterable<GeneratedFile> outputs,
+    void Function(GeneratedFile) onError,
+  ) async {
     if (outputs.isEmpty) {
       return Logger.header('No new files to cache');
     }
 
     Logger.header('Caching ${outputs.length} files');
 
-    final cacheEntry = <String, String>{};
+    final cacheEntries = <GeneratedFile>[];
 
-    for (final file in outputs) {
-      final generatedCodeFile = File(file.path);
-      Logger.i('Caching: ${Utils.getFileName(generatedCodeFile.path)}');
+    for (final output in outputs) {
+      final generatedCodeFile = File(output.genOutputPath);
 
-      final cachedFilePath = path.join(
-        Utils.appCacheDirectory,
-        '${file.path.split(Platform.pathSeparator).last}',
-        // '${file.sourceDigest}_${file.suffix}',
-      );
-      if (generatedCodeFile.existsSync()) {
-        final _ = generatedCodeFile.copySync(cachedFilePath);
-      } else {
-        onError(files.firstWhere((f) => f.path == file.sourcePath));
-        Logger.i('Waiting on dep for ${file.path}');
-        // throw Exception('Expected file but not exist: $cachedFilePath; Original: ${file.path}');
+      if (!generatedCodeFile.existsSync()) {
+        onError(output);
+        Logger.i('Waiting on dep for ${output.genOutputPath}');
         continue;
       }
 
-      /// if file has been successfully copied, let's make an entry to the db
-      if (File(cachedFilePath).existsSync()) {
-        // cacheEntry['${file.sourceDigest}_${file.suffix}'] = cachedFilePath;
-        cacheEntry[file.path] = cachedFilePath;
-      } else {
-        Logger.i(
-          'ERROR: _cacheGeneratedCodesFor: failed to copy generated file $file',
-        );
+      generatedCodeFile.copySync(output.cachedFilePath);
+
+      if (File(output.cachedFilePath).existsSync()) {
+        cacheEntries.add(output);
       }
     }
 
     /// create a bulk entry
-    await _dbOperation((db) => db.createEntryForBulk(cacheEntry));
+    await _dbOperation((db) => db.createEntries(cacheEntries));
   }
 
-  Future<void> copyGeneratedCodesFor(List<CodeFile> files) async {
-    Logger.i(
-        'Copying cached files to project directory (${files.length} total)');
+  Future<void> copyGeneratedCodesFor(List<CodeFile> cached) async {
+    Logger.header('Checking cache for valid files.');
+
+    for (final file in cached) {
+      for (final output in file.generatedOutput) {
+        final genSrc = File(output.genOutputPath);
+        final cacheSrc = File(output.cachedFilePath);
+
+        if (cacheSrc.existsSync()) {
+          if (genSrc.existsSync()) {
+            final srcDigest = DigestUtils.generateDigestForSingleFile(genSrc.path);
+            final cacheDigest = DigestUtils.generateDigestForSingleFile(genSrc.path);
+
+            if (srcDigest == cacheDigest) {
+              Logger.v('Skipping copy for ${output.name}, file has not changed.');
+              continue;
+            }
+
+            genSrc.deleteSync();
+          }
+
+          cacheSrc.copySync(genSrc.path);
+          Logger.v('Copied ${output.name} from cache');
+        }
+      }
+    }
 
     // for (final file in files) {
     //   final cachedGeneratedCodePath = await _dbOperation(
@@ -179,7 +180,7 @@ class CacheProvider {
     return _dbOperation((db) => db.prune(keysToKeep: []));
   }
 
-  Future<Map<String, String>> listCachedFiles() {
+  Future<List<GeneratedFile>> listCachedFiles() {
     return _dbOperation((db) => db.getAllData());
   }
 

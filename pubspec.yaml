@@ -20,6 +20,11 @@ dependencies:
   text_table: ^4.0.3
   pool: ^1.5.1
   collection: 1.18.0
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
 
 dev_dependencies:
   netglade_analysis: ^7.0.0
+  build_runner: ^2.2.0
+  freezed: 2.4.2
+  json_serializable: ^6.7.1

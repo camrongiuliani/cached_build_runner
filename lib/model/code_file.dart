@@ -1,6 +1,13 @@
-import 'package:cached_build_runner/utils/utils.dart';
+import 'dart:io';
+
+import 'package:cached_build_runner/model/generated_file.dart';
 import 'package:collection/collection.dart';
-import 'package:path/path.dart' as pathUtils;
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+export 'generated_file.dart';
+
+part 'code_file.freezed.dart';
+part 'code_file.g.dart';
 
 typedef GenFileDefinition = ({String sourcePath, String? suffix, CodeFileGeneratedType type});
 
@@ -9,43 +16,36 @@ enum CodeFileGeneratedType {
   partFile,
 }
 
-class CodeFile {
-  final String path;
-  final String digest;
-  final bool isTestFile;
-  final List<GeneratedFile> generatedOutput;
+@freezed
+class CodeFile with _$CodeFile {
+  const CodeFile._();
 
-  const CodeFile({
-    required this.path,
-    required this.digest,
-    required this.generatedOutput,
-    this.isTestFile = false,
-  });
+  const factory CodeFile({
+    required String path,
+    required String digest,
+    required List<GeneratedFile> generatedOutput,
+    @Default(false) bool isTestFile,
+  }) = _CodeFile;
+
+  factory CodeFile.fromJson(Map<String, dynamic> json) =>
+      _$CodeFileFromJson(json);
+
+  int get outputLen {
+    return generatedOutput.length;
+  }
 
   String get preferredGenFilter {
     return generatedOutput.firstWhereOrNull((o) {
       return o.suffix == 'g';
-    })?.path ?? '';
+    })?.suffix ?? 'freezed';
+  }
+
+  String get fileName {
+    return path.split(Platform.pathSeparator).last;
   }
 
   @override
   String toString() {
     return '($path, $digest, $isTestFile, Outputs: ${generatedOutput.length})';
   }
-}
-
-class GeneratedFile {
-  final String path;
-  final String sourceDigest;
-  final String sourcePath;
-  final String? suffix;
-  final CodeFileGeneratedType generatedType;
-
-  const GeneratedFile({
-    required this.path,
-    required this.sourceDigest,
-    required this.sourcePath,
-    required this.suffix,
-    required this.generatedType,
-  });
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_build_runner/database/database_service.dart';
 import 'package:cached_build_runner/model/code_file.dart';
@@ -22,25 +23,37 @@ class HiveDatabaseService implements DatabaseService {
   }
 
   @override
-  FutureOr<bool> isMappingAvailable(String digest) {
-    return _box.containsKey(digest);
+  FutureOr<bool> containsFile(GeneratedFile file) {
+    return _box.containsKey(file.key);
   }
 
   @override
-  FutureOr<String> getCachedFilePath(String digest) {
-    final filePath = _box.get(digest);
-    if (filePath == null) {
-      throw Exception(
-        '$_tag: getCachedFilePath: asked path for non existing digest',
-      );
+  FutureOr<GeneratedFile?> getCachedFile(String key) {
+    final str = _box.get(key);
+    if (str == null) {
+      return null;
     }
 
-    return filePath;
+    return GeneratedFile.fromJson(
+      jsonDecode(str) as Map<String, dynamic>,
+    );
   }
 
   @override
-  Future<void> createEntry(String digest, String cachedFilePath) {
-    return _box.put(digest, cachedFilePath);
+  Future<void> createEntry(GeneratedFile file) {
+    return _box.put(
+      file.key,
+      jsonEncode(
+        file.toJson(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> createEntries(List<GeneratedFile> files) async {
+    for (final file in files) {
+      await createEntry(file);
+    }
   }
 
   @override
@@ -49,39 +62,22 @@ class HiveDatabaseService implements DatabaseService {
   }
 
   @override
-  Future<void> createEntryForBulk(Map<String, String> cachedFilePaths) {
-    cachedFilePaths.removeWhere((key, value) {
-      return key.length > 253;
-    });
-    return _box.putAll(cachedFilePaths);
-  }
+  FutureOr<List<GeneratedFile>> getCachedFiles(Iterable<String> keys) async {
+    final files = <GeneratedFile>[];
 
-  @override
-  FutureOr<Map<String, String>> getCachedFilePathForBulk(
-    Iterable<String> digests,
-  ) {
-    final data = <String, String>{};
+    for (final key in keys) {
+      final value = _box.get(key);
 
-    for (final digest in digests) {
-      data[digest] = getCachedFilePath(digest) as String;
-    }
-
-    return data;
-  }
-
-  @override
-  FutureOr<Map<String, bool>> isMappingAvailableForBulk(
-    Iterable<CodeFile> files,
-  ) {
-    final data = <String, bool>{};
-
-    for (final file in files) {
-      for (final output in file.generatedOutput) {
-        data[output.path] = isMappingAvailable(output.path) as bool;
+      if (value != null) {
+        files.add(
+          GeneratedFile.fromJson(
+            jsonDecode(value) as Map<String, dynamic>,
+          ),
+        );
       }
     }
 
-    return data;
+    return files;
   }
 
   @override
@@ -122,14 +118,13 @@ class HiveDatabaseService implements DatabaseService {
   }
 
   @override
-  Future<Map<String, String>> getAllData() {
-    final result = <String, String>{};
-    for (final key in _box.keys) {
-      final value = _box.get(key);
-
-      result[key as String] = value!;
-    }
-
-    return Future.value(result);
+  Future<List<GeneratedFile>> getAllData() async {
+    return _box.values.where((v) {
+      return v.startsWith('{') || v.startsWith('[');
+    }).map((e) {
+      return GeneratedFile.fromJson(
+        jsonDecode(e) as Map<String, dynamic>,
+      );
+    }).toList();
   }
 }

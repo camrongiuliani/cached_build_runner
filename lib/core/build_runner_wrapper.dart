@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cached_build_runner/model/code_file.dart';
 import 'package:cached_build_runner/utils/logger.dart';
 import 'package:cached_build_runner/utils/utils.dart';
+import 'package:collection/collection.dart';
 import 'package:pool/pool.dart';
-import 'package:collection/src/iterable_extensions.dart';
 
 class BuildRunnerWrapper {
   const BuildRunnerWrapper();
@@ -20,14 +21,18 @@ class BuildRunnerWrapper {
     return chunks;
   }
 
-  Future<bool> runBuild(List<CodeFile> files,
-      void Function(List<CodeFile> files) onChunkComplete) async {
+  Future<bool> runBuild(
+    List<CodeFile> files,
+    void Function(List<GeneratedFile> files) onChunkComplete,
+  ) async {
     if (files.isEmpty) return true;
     Logger.header(
       'Generating Codes for non-cached files, found ${files.length} files',
     );
 
     Logger.v('Running build_runner build...', showPrefix: false);
+
+    final buildTimes = <int>[];
 
     final pool = Pool(3);
 
@@ -38,36 +43,37 @@ class BuildRunnerWrapper {
         .flattened
         .length;
 
-    Logger.i('Total Files: ${fileLen}');
+    Logger.i('Total Files: $fileLen');
 
-    // final chunks = splitList(files, 5);
-    final chunks = [files];
+    final chunks = splitList(files, 10);
 
     Logger.i('Total Chunks: ${chunks.length}');
 
-    int chunksComplete = 0;
+    var chunksComplete = 0;
 
-    Completer completer = Completer();
+    final completer = Completer<void>();
 
     // Logger.d('Run: "flutter pub run build_runner build --build-filter $filterList"');
-    var s = pool.forEach(
+    final s = pool.forEach(
       chunks,
       (e) async {
-        var paths = e
+        final stopWatch = Stopwatch()..start();
+
+        final paths = e
             .map(
               (e) => e.generatedOutput.map((e) {
-                return e.path;
+                return e.genOutputPath;
               }),
             )
             .flattened
             .where((p) => !p.endsWith('.freezed.dart'))
             .toList();
 
-        Completer<void> completer = Completer();
+        final completer = Completer<void>();
 
-        var filter = paths.join(',');
+        final filter = paths.join(',');
 
-        var process = await Process.start(
+        final process = await Process.start(
           'dart',
           [
             // '--old_gen_heap_size=$heapSize',
@@ -87,8 +93,12 @@ class BuildRunnerWrapper {
         process.stdout.listen(
           (event) {
             try {
-              Logger.v(utf8.decode(event).trim(), showPrefix: false);
-            } catch (e) {
+              final msg = utf8.decode(event).trim();
+
+              if (!msg.contains('[INFO]')) {
+                Logger.v(utf8.decode(event).trim(), showPrefix: false);
+              }
+            } on Exception catch (e) {
               print('SDTDOUT');
             }
           },
@@ -102,7 +112,23 @@ class BuildRunnerWrapper {
 
               Logger.i('Chunks Complete: $chunksComplete / ${chunks.length}');
               Logger.i('Pct Complete: ${pctComplete.toStringAsFixed(2)}%');
-              onChunkComplete(e);
+
+              stopWatch.stop();
+              buildTimes.add(stopWatch.elapsedMilliseconds);
+
+              if (buildTimes.length >= 10) {
+                printTimeRemaining(
+                  buildTimes: buildTimes,
+                  chunksLen: chunks.length,
+                  chunksComplete: chunksComplete,
+                );
+              } else {
+                Logger.i('Time remaining to be calculated after 10 chunks');
+              }
+
+              onChunkComplete(
+                e.map((e) => e.generatedOutput).flattened.toList(),
+              );
               completer.complete();
             }
           },
@@ -165,4 +191,30 @@ class BuildRunnerWrapper {
     // return p.exitCode == 0;
   }
 
+  void printTimeRemaining({
+    required List<int> buildTimes,
+    required int chunksLen,
+    required int chunksComplete,
+  }) {
+    final avg = buildTimes.reduce((a, b) => a + b) / buildTimes.length;
+    final avgSec = avg / 1000;
+    Logger.i('Avg Seconds / Chunk: ${avgSec.toStringAsFixed(2)}');
+
+    final minutesRemain = (avgSec / 60) * (chunksLen - chunksComplete);
+    final str = formatMinutesToHoursMinutes(minutesRemain.toInt());
+    Logger.i('Time Remaining: $str');
+  }
+
+  String formatMinutesToHoursMinutes(int minutes) {
+    // Calculate hours and remaining minutes
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+
+    // Format hours and minutes with leading zeros for single digits
+    final hoursStr = hours.toString().padLeft(2, '0');
+    final minutesStr = remainingMinutes.toString().padLeft(2, '0');
+
+    // Combine formatted hours and minutes with a colon
+    return '${hoursStr}h ${minutesStr}m';
+  }
 }

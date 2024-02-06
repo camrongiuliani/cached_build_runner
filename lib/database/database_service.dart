@@ -9,29 +9,24 @@ abstract class DatabaseService {
   /// Initializes the database service.
   Future<void> init();
 
-  Future<Map<String, String>> getAllData();
-
-  /// Checks if the mapping is available for the given digests in bulk.
-  FutureOr<Map<String, bool>> isMappingAvailableForBulk(
-    Iterable<CodeFile> files,
-  );
+  Future<List<GeneratedFile>> getAllData();
 
   /// Checks if the mapping is available for the given digest.
-  FutureOr<bool> isMappingAvailable(String digest);
+  FutureOr<bool> containsFile(GeneratedFile file);
 
   /// Gets the cached file path for the given digests in bulk.
-  FutureOr<Map<String, String>> getCachedFilePathForBulk(
-    Iterable<String> digests,
+  FutureOr<List<GeneratedFile>> getCachedFiles(
+    Iterable<String> keys,
   );
 
   /// Gets the cached file path for the given digest.
-  FutureOr<String> getCachedFilePath(String digest);
+  FutureOr<GeneratedFile?> getCachedFile(String key);
 
   /// Creates entries for the given cached file paths in bulk.
-  Future<void> createEntryForBulk(Map<String, String> cachedFilePaths);
+  Future<void> createEntries(List<GeneratedFile> files);
 
   /// Creates an entry for the given digest and cached file path.
-  Future<void> createEntry(String digest, String cachedFilePath);
+  Future<void> createEntry(GeneratedFile file);
 
   /// Creates custom [entry] under [key].
   Future<void> createCustomEntry(String key, String entry);

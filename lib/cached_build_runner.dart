@@ -104,44 +104,59 @@ class CachedBuildRunner implements Disposable {
     final libFiles = _fileParser.getFilesNeedingGeneration();
     final files = List<CodeFile>.of(libFiles);
 
-    final mappedResult = await _cacheProvider.mapFilesToCache(files);
+    final (:cached, :notCached) = await _cacheProvider.determineCache(files);
 
-    final goodFiles = mappedResult.good;
-    final badFiles = mappedResult.bad;
+    final numCached = cached
+        .map((e) {
+          return e.generatedOutput;
+        })
+        .flattened
+        .length;
 
-    Logger.i('No. of cached files: ${goodFiles.map((e) => e.generatedOutput).flattened.length}');
-    Logger.i('No. of non-cached files: ${badFiles.map((e) => e.generatedOutput).flattened.length}');
+    final numNotCached = notCached
+        .map((e) {
+          return e.generatedOutput;
+        })
+        .flattened
+        .length;
 
-    Logger.v(badFiles.map((e) => e.path).join('\n'));
+    Logger.i('No. of cached files: $numCached');
+    Logger.i('No. of non-cached files: $numNotCached');
 
-    List<CodeFile> errorFiles = [];
+    if (numNotCached == 0) {
+      return Logger.header('Nice! There is nothing to generate.');
+    }
+
+    await _cacheProvider.copyGeneratedCodesFor(cached);
+
+    final errorFiles = <GeneratedFile>[];
 
     /// let's handle bad files - by generating the .g.dart / .mocks.dart files for them
     final success = await _buildRunnerWrapper.runBuild(
-      badFiles,
+      notCached,
       (files) async {
         /// at last, let's cache the bad files - they may be required next time
-        await _cacheProvider.cacheFiles(
+        await _cacheProvider.cacheOutput(
           files,
-          (errFile) {
-            errorFiles.add(errFile);
-          },
+          errorFiles.add,
         );
       },
     );
-    // await listAllCachedFiles();
 
     if (errorFiles.isNotEmpty) {
+      Logger.i('Re-Attempting ${errorFiles.length} failed outputs');
+      final (:cached, :notCached) = await _cacheProvider.determineCache(files);
+
+      await _cacheProvider.copyGeneratedCodesFor(cached);
+
       final success = await _buildRunnerWrapper.runBuild(
-        errorFiles.reversed.toList(),
-            (files) async {
+        notCached,
+        (files) async {
           /// at last, let's cache the bad files - they may be required next time
-          await _cacheProvider.cacheFiles(
+          await _cacheProvider.cacheOutput(
             files,
-                (errFile) {
-              // errorFiles.add(errFile);
-              //     throw Exception('Error on second try of file: ${errFile.path}');
-                  Logger.e('Error on second try of file: ${errFile.path}');
+            (errFile) {
+              Logger.e('Error on second try of file: ${errFile.ownerPath}');
             },
           );
         },
@@ -156,23 +171,43 @@ class CachedBuildRunner implements Disposable {
     /// We are done, probably?
   }
 
+  Future<void> hydrateCache() async {
+    final libFiles = _fileParser.getFilesNeedingGeneration();
+
+    final genFiles = libFiles
+        .map((e) {
+          return e.generatedOutput;
+        })
+        .flattened
+        .where((output) {
+          return File(output.genOutputPath).existsSync();
+        });
+
+    Logger.header('Hydrating cache with ${genFiles.length} files.');
+
+    await _cacheProvider.cacheOutput(
+      genFiles,
+      (errFile) {
+        Logger.e('Error hydrating ${errFile.name}');
+      },
+    );
+  }
+
   Future<void> listAllCachedFiles() async {
     final libFiles = _fileParser.getFilesNeedingGeneration();
     final files = List<CodeFile>.of(libFiles);
 
-    final mappedResult = await _cacheProvider.mapFilesToCache(files);
+    final mappedResult = await _cacheProvider.determineCache(files);
 
-    final goodFiles = mappedResult.good.map<_CachedFileInfo>(
+    final goodFiles = mappedResult.cached.map<_CachedFileInfo>(
         (e) => (path: e.path, digest: e.digest, dirty: false));
-    final badFiles = mappedResult.bad
+    final badFiles = mappedResult.notCached
         .map((e) => (path: e.path, digest: e.digest, dirty: true));
 
-    final mappedFiles = [...goodFiles, ...badFiles]
-        .where((e) {
-          return e.dirty;
-        })
-        .toList()
-        .sublist(0, 50)
+    final mappedFiles = [...goodFiles, ...badFiles].where((e) {
+      return !e.dirty;
+    }).toList()
+      // .sublist(0, 50)
       ..sort((a, b) {
         return a.path.compareTo(b.path);
       });

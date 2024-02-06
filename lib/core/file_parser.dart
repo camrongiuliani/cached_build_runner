@@ -36,23 +36,35 @@ class FileParser {
       final outputs = _parseFile(entity);
 
       if (outputs.isNotEmpty) {
+        final digest = DigestUtils.generateDigestForClassFile(
+          _dependencyVisitor,
+          entity.path,
+        );
+
         codeFiles.add(
           CodeFile(
             path: entity.path,
-            digest: DigestUtils.generateDigestForClassFile(
-              _dependencyVisitor,
-              entity.path,
-            ),
+            digest: digest,
             generatedOutput: outputs.map((e) {
-              return GeneratedFile(
-                sourcePath: entity.path,
-                path: entity.path.replaceAll('.dart', '.${e.suffix ?? 'g'}.dart'),
-                suffix: e.suffix,
-                sourceDigest: DigestUtils.generateDigestForClassFile(
-                  _dependencyVisitor,
-                  entity.path,
+              final genOutputPath = entity.path.replaceAll(
+                '.dart',
+                '.${e.suffix ?? 'g'}.dart',
+              );
+
+              final cachedPath = File(
+                path.join(
+                  Utils.appCacheDirectory,
+                  genOutputPath.split(Platform.pathSeparator).last,
                 ),
+              ).absolute.uri.path;
+
+              return GeneratedFile(
+                ownerPath: entity.path,
+                ownerDigest: digest,
+                genOutputPath: genOutputPath,
+                cachedFilePath: cachedPath,
                 generatedType: e.type,
+                suffix: e.suffix,
               );
             }).toList(),
           ),

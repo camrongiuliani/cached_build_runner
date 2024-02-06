@@ -1,6 +1,7 @@
 import 'package:args/command_runner.dart';
 import 'package:cached_build_runner/args/args_utils.dart';
 import 'package:cached_build_runner/commands/cache/cache_prune_sub_command.dart';
+import 'package:cached_build_runner/commands/cache/hydrate.dart';
 import 'package:cached_build_runner/commands/cache/list_cache_sub_command.dart';
 
 class CacheCommand extends Command<void> {
@@ -13,6 +14,7 @@ class CacheCommand extends Command<void> {
   CacheCommand() {
     addSubcommand(CachePruneSubCommand());
     addSubcommand(ListCacheSubCommand());
+    addSubcommand(HydrateCacheSubCommand());
   }
 
   // @override

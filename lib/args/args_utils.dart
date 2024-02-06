@@ -11,6 +11,7 @@ class _Commands {
   // Cache subcomammnds
   String get prune => 'prune';
   String get list => 'list';
+  String get hydrate => 'hydrate';
 
   const _Commands();
 }
